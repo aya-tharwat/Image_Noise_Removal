@@ -1,5 +1,5 @@
 """
-Image Noise Removal Laboratory — Main Streamlit Application (Phase 3: Noise Generation)
+Image Noise Removal Laboratory — Main Streamlit Application (Phase 4: Spatial Filtering)
 
 Provides a modern dark-themed dashboard layout with sidebar navigation
 across four core views:
@@ -12,6 +12,14 @@ across four core views:
 from pathlib import Path
 import streamlit as st
 
+from src.filters import (
+    BILATERAL_DIAMETERS,
+    FILTER_DESCRIPTIONS,
+    FILTER_TYPES,
+    KERNEL_SIZES,
+    apply_filter,
+    format_filter_params,
+)
 from src.image_utils import (
     list_sample_images,
     load_and_validate_image,
@@ -59,6 +67,8 @@ def init_session_state() -> None:
         "noise_intensity": None,
         "noise_param_label": None,
         "filtered_image": None,
+        "filter_name": None,
+        "filter_param_label": None,
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -76,6 +86,8 @@ def set_active_image(image, info: dict, image_id: str) -> None:
         st.session_state.noise_intensity = None
         st.session_state.noise_param_label = None
         st.session_state.filtered_image = None
+        st.session_state.filter_name = None
+        st.session_state.filter_param_label = None
 
 
 # ---------------------------------------------------------------------------
@@ -350,6 +362,8 @@ def render_noise_laboratory() -> None:
             st.session_state.noise_param_label = param_label
             # Clear previous filtered output since the noisy image changed
             st.session_state.filtered_image = None
+            st.session_state.filter_name = None
+            st.session_state.filter_param_label = None
 
         if st.session_state.noisy_image is not None:
             st.markdown("<br>", unsafe_allow_html=True)
@@ -375,15 +389,144 @@ def render_noise_laboratory() -> None:
 
     st.divider()
 
-    # Upcoming phases placeholder
+    # ------------------------------------------------------------------
+    # Step 3: Spatial Filtering (Average, Gaussian, Median, Bilateral)
+    # ------------------------------------------------------------------
+    st.subheader("3. Spatial Filtering")
+
+    if st.session_state.noisy_image is None:
+        st.info("Generate a noisy image in **Step 2** first to apply spatial filters.")
+    else:
+        f_col1, f_col2, f_col3 = st.columns([1.2, 1.5, 0.9], gap="medium")
+
+        with f_col1:
+            selected_filter = st.selectbox(
+                label="Spatial Filter",
+                options=FILTER_TYPES,
+                help="Choose a classical OpenCV spatial filter to denoise the image.",
+            )
+
+        # Default parameter values (adjusted below based on selected filter)
+        kernel_size = 5
+        sigma = 0.0
+        diameter = 9
+        sigma_color = 75.0
+        sigma_space = 75.0
+
+        with f_col2:
+            if selected_filter in ("Average Filter", "Median Filter"):
+                kernel_size = st.select_slider(
+                    label="Kernel Size (odd window)",
+                    options=KERNEL_SIZES,
+                    value=5,
+                    help="Larger kernels smooth more strongly but can blur fine details.",
+                )
+            elif selected_filter == "Gaussian Filter":
+                p1, p2 = st.columns(2)
+                with p1:
+                    kernel_size = st.select_slider(
+                        label="Kernel Size",
+                        options=KERNEL_SIZES,
+                        value=5,
+                    )
+                with p2:
+                    sigma = st.slider(
+                        label="Sigma (0 = auto)",
+                        min_value=0.0,
+                        max_value=5.0,
+                        value=0.0,
+                        step=0.5,
+                    )
+            else:  # Bilateral Filter
+                p1, p2 = st.columns(2)
+                with p1:
+                    diameter = st.select_slider(
+                        label="Diameter (d)",
+                        options=BILATERAL_DIAMETERS,
+                        value=9,
+                    )
+                with p2:
+                    sigma_val = st.slider(
+                        label="Sigma Color & Space",
+                        min_value=25,
+                        max_value=150,
+                        value=75,
+                        step=25,
+                    )
+                    sigma_color = float(sigma_val)
+                    sigma_space = float(sigma_val)
+
+        filter_param_text = format_filter_params(
+            filter_name=selected_filter,
+            kernel_size=kernel_size,
+            sigma=sigma,
+            diameter=diameter,
+            sigma_color=sigma_color,
+            sigma_space=sigma_space,
+        )
+
+        with f_col3:
+            st.markdown("<br>", unsafe_allow_html=True)
+            apply_filter_clicked = st.button(
+                "Apply Filter",
+                type="primary",
+                width="stretch",
+            )
+
+        st.caption(
+            f"**{selected_filter} ({filter_param_text}):** "
+            f"{FILTER_DESCRIPTIONS[selected_filter]}"
+        )
+
+        if apply_filter_clicked:
+            filtered = apply_filter(
+                st.session_state.noisy_image,
+                filter_name=selected_filter,
+                kernel_size=kernel_size,
+                sigma=sigma,
+                diameter=diameter,
+                sigma_color=sigma_color,
+                sigma_space=sigma_space,
+            )
+            st.session_state.filtered_image = filtered
+            st.session_state.filter_name = selected_filter
+            st.session_state.filter_param_label = filter_param_text
+
+        if st.session_state.filtered_image is not None:
+            st.markdown("<br>", unsafe_allow_html=True)
+            n_col, flt_col = st.columns(2, gap="medium")
+
+            with n_col:
+                st.image(
+                    resize_for_display(st.session_state.noisy_image),
+                    caption=(
+                        f"Noisy Input — {st.session_state.noise_type} "
+                        f"({st.session_state.noise_intensity})"
+                    ),
+                    width="stretch",
+                )
+
+            with flt_col:
+                st.image(
+                    resize_for_display(st.session_state.filtered_image),
+                    caption=(
+                        f"Filtered Output — {st.session_state.filter_name} "
+                        f"({st.session_state.filter_param_label})"
+                    ),
+                    width="stretch",
+                )
+
+    st.divider()
+
+    # Upcoming phase placeholder
     st.markdown(
         """
         <div class="lab-card">
-            <span class="badge">Coming in Phases 4–5</span>
-            <h3>3. Spatial Filtering &amp; 3-Way Comparison</h3>
+            <span class="badge">Coming in Phase 5</span>
+            <h3>4. 3-Way Visual Comparison &amp; MSE / PSNR Metrics</h3>
             <p>
-                Apply Average, Gaussian, Median, or Bilateral filters to the noisy image
-                and compare Original, Noisy, and Filtered results with MSE/PSNR metrics.
+                Side-by-side Original, Noisy, and Filtered comparison grid with
+                quantitative MSE/PSNR scores and an automatic experiment summary.
             </p>
         </div>
         """,
@@ -518,7 +661,7 @@ def main() -> None:
         )
 
         st.divider()
-        st.caption("Phase 3 • Noise Generation")
+        st.caption("Phase 4 • Spatial Filtering")
 
     if page == "Dashboard":
         render_dashboard()
