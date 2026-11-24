@@ -16,6 +16,8 @@ from PIL import Image, UnidentifiedImageError
 
 ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png"}
 SAMPLE_IMAGES_DIR = Path(__file__).resolve().parent.parent / "sample_images"
+MIN_IMAGE_DIMENSION = 16
+MAX_PROCESSING_DIMENSION = 1600
 
 
 def get_image_info(
@@ -23,6 +25,7 @@ def get_image_info(
     filename: str,
     image_format: str = "Unknown",
     original_mode: str = "RGB",
+    was_resized: bool = False,
 ) -> dict[str, Any]:
     """Return basic metadata about an RGB NumPy image for UI display."""
     height, width = image.shape[:2]
@@ -34,6 +37,7 @@ def get_image_info(
         "channels": channels,
         "format": image_format or "Unknown",
         "original_mode": original_mode,
+        "was_resized": was_resized,
         "dtype": str(image.dtype),
     }
 
@@ -45,8 +49,11 @@ def _decode_image_bytes(
     """
     Validate raw image bytes with Pillow and convert to an RGB uint8 NumPy array.
 
+    Automatically downscales oversized images (> 1600 px on longest side) so
+    classical spatial filters remain fast and responsive on normal laptops.
+
     Raises:
-        ValueError: If the file extension is unsupported, empty, or corrupted.
+        ValueError: If the file extension is unsupported, empty, too small, or corrupted.
     """
     suffix = Path(filename).suffix.lower()
     if suffix not in ALLOWED_EXTENSIONS:
@@ -73,7 +80,25 @@ def _decode_image_bytes(
         with Image.open(BytesIO(raw_bytes)) as img:
             original_mode = img.mode
             rgb_img = img.convert("RGB")
+            width, height = rgb_img.size
+
+            if width < MIN_IMAGE_DIMENSION or height < MIN_IMAGE_DIMENSION:
+                raise ValueError(
+                    f"Image is too small ({width}×{height} px). "
+                    f"Minimum supported size is {MIN_IMAGE_DIMENSION}×{MIN_IMAGE_DIMENSION} px."
+                )
+
+            was_resized = False
+            if max(width, height) > MAX_PROCESSING_DIMENSION:
+                rgb_img.thumbnail(
+                    (MAX_PROCESSING_DIMENSION, MAX_PROCESSING_DIMENSION),
+                    Image.Resampling.LANCZOS,
+                )
+                was_resized = True
+
             image_array = np.array(rgb_img, dtype=np.uint8)
+    except ValueError:
+        raise
     except Exception as exc:
         raise ValueError(
             f"Could not decode '{filename}'. Please try another JPG or PNG file."
@@ -87,6 +112,7 @@ def _decode_image_bytes(
         filename=filename,
         image_format=image_format,
         original_mode=original_mode,
+        was_resized=was_resized,
     )
     return image_array, metadata
 

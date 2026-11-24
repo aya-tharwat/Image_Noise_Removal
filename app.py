@@ -1,8 +1,10 @@
 """
-Image Noise Removal Laboratory — Main Streamlit Application (Phase 6: Filter Comparison)
+Image Noise Removal Laboratory — Main Streamlit Application
 
-Provides a modern dark-themed dashboard layout with sidebar navigation
-across four core views:
+An interactive classical image-processing workbench built with Python,
+NumPy, OpenCV, Pillow, Matplotlib, and Streamlit.
+
+Navigation Views:
 1. Dashboard
 2. Noise Laboratory
 3. Filter Comparison
@@ -292,6 +294,11 @@ def render_noise_laboratory() -> None:
                 st.caption(
                     f"Converted automatically from `{info['original_mode']}` to `RGB` "
                     "for consistent noise and filter processing."
+                )
+            if info.get("was_resized"):
+                st.caption(
+                    "Scaled proportionally to a maximum side of 1600 px to keep "
+                    "classical spatial filtering fast and responsive."
                 )
 
     with preview_col:
@@ -851,6 +858,34 @@ def render_about_project() -> None:
         )
 
 
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.subheader("Quick Reference: Noise Type vs. Best Spatial Filter")
+    st.dataframe(
+        [
+            {
+                "Noise Type": "Gaussian Noise",
+                "Visual Appearance": "Uniform random grain across the whole image",
+                "Recommended Filter": "Gaussian or Bilateral Filter",
+                "Why It Works Best": "Weighted averaging cancels zero-mean random fluctuations; Bilateral also preserves sharp edges.",
+            },
+            {
+                "Noise Type": "Salt-and-Pepper Noise",
+                "Visual Appearance": "Isolated pure white (255) and black (0) dots",
+                "Recommended Filter": "Median Filter",
+                "Why It Works Best": "Non-linear median ignores extreme 0/255 outliers instead of smearing them into neighbors.",
+            },
+            {
+                "Noise Type": "Speckle Noise",
+                "Visual Appearance": "Multiplicative grain stronger in brighter regions",
+                "Recommended Filter": "Gaussian, Median, or Bilateral Filter",
+                "Why It Works Best": "Spatial smoothing suppresses granular variance while balancing detail preservation.",
+            },
+        ],
+        width="stretch",
+        hide_index=True,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Sidebar Navigation & Entrypoint
 # ---------------------------------------------------------------------------
@@ -882,7 +917,19 @@ def main() -> None:
         )
 
         st.divider()
-        st.caption("Phase 6 • Filter Comparison & Chart")
+
+        # Live active-session summary in sidebar
+        if st.session_state.image_info is not None:
+            st.caption(f"**Active Image:** {st.session_state.image_info['filename']}")
+            if st.session_state.noise_type is not None:
+                st.caption(
+                    f"**Noise:** {st.session_state.noise_type} "
+                    f"({st.session_state.noise_intensity})"
+                )
+        else:
+            st.caption("No image loaded yet.")
+
+        st.caption("Image Noise Removal Lab • v1.0")
 
     if page == "Dashboard":
         render_dashboard()
