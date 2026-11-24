@@ -1,5 +1,5 @@
 """
-Image Noise Removal Laboratory — Main Streamlit Application (Phase 2: Image Input)
+Image Noise Removal Laboratory — Main Streamlit Application (Phase 3: Noise Generation)
 
 Provides a modern dark-themed dashboard layout with sidebar navigation
 across four core views:
@@ -17,6 +17,13 @@ from src.image_utils import (
     load_and_validate_image,
     load_sample_image,
     resize_for_display,
+)
+from src.noise import (
+    INTENSITY_LEVELS,
+    NOISE_DESCRIPTIONS,
+    NOISE_TYPES,
+    apply_noise,
+    get_noise_parameter_label,
 )
 
 
@@ -48,6 +55,9 @@ def init_session_state() -> None:
         "image_info": None,
         "active_image_id": None,
         "noisy_image": None,
+        "noise_type": None,
+        "noise_intensity": None,
+        "noise_param_label": None,
         "filtered_image": None,
     }
     for key, value in defaults.items():
@@ -62,6 +72,9 @@ def set_active_image(image, info: dict, image_id: str) -> None:
         st.session_state.image_info = info
         st.session_state.active_image_id = image_id
         st.session_state.noisy_image = None
+        st.session_state.noise_type = None
+        st.session_state.noise_intensity = None
+        st.session_state.noise_param_label = None
         st.session_state.filtered_image = None
 
 
@@ -285,30 +298,97 @@ def render_noise_laboratory() -> None:
 
     st.divider()
 
-    # Upcoming phases placeholders
-    c2, c3 = st.columns(2, gap="medium")
-    with c2:
-        st.markdown(
-            """
-            <div class="lab-card">
-                <span class="badge">Coming in Phase 3</span>
-                <h3>2. Noise Generation</h3>
-                <p>Apply Gaussian, Salt-and-Pepper, or Speckle noise at Low, Medium, or High intensity.</p>
-            </div>
-            """,
-            unsafe_allow_html=True,
+    # ------------------------------------------------------------------
+    # Step 2: Noise Generation (Gaussian, Salt-and-Pepper, Speckle)
+    # ------------------------------------------------------------------
+    st.subheader("2. Noise Generation")
+
+    if st.session_state.original_image is None:
+        st.info("Upload or select a clean image in **Step 1** first to generate noise.")
+    else:
+        ctrl_col1, ctrl_col2, ctrl_col3 = st.columns([1.3, 1.3, 1], gap="medium")
+
+        with ctrl_col1:
+            selected_noise = st.selectbox(
+                label="Noise Type",
+                options=NOISE_TYPES,
+                help="Choose which classical noise model to inject into the clean image.",
+            )
+
+        with ctrl_col2:
+            selected_intensity = st.select_slider(
+                label="Noise Intensity",
+                options=INTENSITY_LEVELS,
+                value="Medium",
+                help="Select Low, Medium, or High noise strength.",
+            )
+
+        param_label = get_noise_parameter_label(selected_noise, selected_intensity)
+
+        with ctrl_col3:
+            st.markdown("<br>", unsafe_allow_html=True)
+            apply_clicked = st.button(
+                "Apply Noise",
+                type="primary",
+                width="stretch",
+            )
+
+        st.caption(
+            f"**{selected_noise} ({selected_intensity} — {param_label}):** "
+            f"{NOISE_DESCRIPTIONS[selected_noise]}"
         )
-    with c3:
-        st.markdown(
-            """
-            <div class="lab-card">
-                <span class="badge">Coming in Phases 4–5</span>
-                <h3>3. Spatial Filtering &amp; Comparison</h3>
-                <p>Apply spatial filters and compare Original, Noisy, and Filtered images with PSNR.</p>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+
+        if apply_clicked:
+            noisy = apply_noise(
+                st.session_state.original_image,
+                noise_type=selected_noise,
+                intensity=selected_intensity,
+            )
+            st.session_state.noisy_image = noisy
+            st.session_state.noise_type = selected_noise
+            st.session_state.noise_intensity = selected_intensity
+            st.session_state.noise_param_label = param_label
+            # Clear previous filtered output since the noisy image changed
+            st.session_state.filtered_image = None
+
+        if st.session_state.noisy_image is not None:
+            st.markdown("<br>", unsafe_allow_html=True)
+            orig_col, noisy_col = st.columns(2, gap="medium")
+
+            with orig_col:
+                st.image(
+                    resize_for_display(st.session_state.original_image),
+                    caption="Original Clean Image",
+                    width="stretch",
+                )
+
+            with noisy_col:
+                st.image(
+                    resize_for_display(st.session_state.noisy_image),
+                    caption=(
+                        f"Noisy Image — {st.session_state.noise_type} "
+                        f"({st.session_state.noise_intensity}, "
+                        f"{st.session_state.noise_param_label})"
+                    ),
+                    width="stretch",
+                )
+
+    st.divider()
+
+    # Upcoming phases placeholder
+    st.markdown(
+        """
+        <div class="lab-card">
+            <span class="badge">Coming in Phases 4–5</span>
+            <h3>3. Spatial Filtering &amp; 3-Way Comparison</h3>
+            <p>
+                Apply Average, Gaussian, Median, or Bilateral filters to the noisy image
+                and compare Original, Noisy, and Filtered results with MSE/PSNR metrics.
+            </p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def render_filter_comparison() -> None:
@@ -438,7 +518,7 @@ def main() -> None:
         )
 
         st.divider()
-        st.caption("Phase 2 • Image Input & Validation")
+        st.caption("Phase 3 • Noise Generation")
 
     if page == "Dashboard":
         render_dashboard()
