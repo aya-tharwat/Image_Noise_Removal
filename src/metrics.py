@@ -9,6 +9,8 @@ Uses pure NumPy so no extra heavy dependencies are required:
 from typing import Any
 import numpy as np
 
+from src.filters import FILTER_TYPES, apply_filter, format_filter_params
+
 
 def calculate_mse(original: np.ndarray, processed: np.ndarray) -> float:
     """
@@ -118,3 +120,102 @@ def evaluate_single_experiment(
         "psnr_gain": psnr_gain,
         "verdict": verdict,
     }
+
+
+def evaluate_all_filters(
+    original: np.ndarray,
+    noisy: np.ndarray,
+    kernel_size: int = 5,
+    bilateral_diameter: int = 9,
+    bilateral_sigma: float = 75.0,
+) -> dict[str, Any]:
+    """
+    Run all four classical spatial filters on the same noisy image and
+    compare their MSE and PSNR scores against the clean original.
+    """
+    noisy_mse = calculate_mse(original, noisy)
+    noisy_psnr = calculate_psnr(original, noisy)
+
+    results: list[dict[str, Any]] = []
+    for filter_name in FILTER_TYPES:
+        filtered = apply_filter(
+            noisy,
+            filter_name=filter_name,
+            kernel_size=kernel_size,
+            sigma=0.0,
+            diameter=bilateral_diameter,
+            sigma_color=bilateral_sigma,
+            sigma_space=bilateral_sigma,
+        )
+        mse = calculate_mse(original, filtered)
+        psnr = calculate_psnr(original, filtered)
+        psnr_gain = (
+            float("inf")
+            if (np.isinf(psnr) and not np.isinf(noisy_psnr))
+            else (0.0 if (np.isinf(psnr) and np.isinf(noisy_psnr)) else psnr - noisy_psnr)
+        )
+        params_label = format_filter_params(
+            filter_name=filter_name,
+            kernel_size=kernel_size,
+            sigma=0.0,
+            diameter=bilateral_diameter,
+            sigma_color=bilateral_sigma,
+            sigma_space=bilateral_sigma,
+        )
+        results.append(
+            {
+                "filter_name": filter_name,
+                "params": params_label,
+                "image": filtered,
+                "mse": mse,
+                "psnr": psnr,
+                "psnr_gain": psnr_gain,
+            }
+        )
+
+    # Lowest MSE corresponds strictly to highest PSNR (even when PSNR is inf)
+    best_entry = min(results, key=lambda item: item["mse"])
+
+    return {
+        "noisy_mse": noisy_mse,
+        "noisy_psnr": noisy_psnr,
+        "results": results,
+        "best_filter": best_entry["filter_name"],
+        "best_psnr": best_entry["psnr"],
+        "best_mse": best_entry["mse"],
+        "best_gain": best_entry["psnr_gain"],
+    }
+
+
+def get_noise_filter_insight(noise_type: str, best_filter: str) -> str:
+    """
+    Provide a concise, student-friendly academic explanation of why the winning
+    filter performed best on the selected noise type (formatted with HTML <strong>).
+    """
+    explanations = {
+        "Gaussian Noise": (
+            f"For <strong>Gaussian Noise</strong>, <strong>{best_filter}</strong> achieved "
+            "the highest PSNR in this test. Because Gaussian noise adds smooth, zero-mean "
+            "random variations to every pixel, weighted smoothing filters "
+            "(<strong>Gaussian</strong> and <strong>Bilateral</strong>) average out positive "
+            "and negative fluctuations effectively—with the Bilateral Filter preserving sharp edges."
+        ),
+        "Salt-and-Pepper Noise": (
+            f"For <strong>Salt-and-Pepper Noise</strong>, <strong>{best_filter}</strong> achieved "
+            "the highest PSNR in this test. Because Salt-and-Pepper injects extreme 0 (black) "
+            "and 255 (white) outliers, linear averaging filters smear those extremes into "
+            "neighbors, whereas the non-linear <strong>Median Filter</strong> discards outliers "
+            "by picking the middle neighborhood value."
+        ),
+        "Speckle Noise": (
+            f"For <strong>Speckle Noise</strong>, <strong>{best_filter}</strong> achieved "
+            "the highest PSNR in this test. Because Speckle is multiplicative (stronger in "
+            "bright regions), spatial smoothing filters (<strong>Gaussian</strong>, "
+            "<strong>Median</strong>, or <strong>Bilateral</strong>) reduce granular variance "
+            "while balancing noise suppression against detail preservation."
+        ),
+    }
+    return explanations.get(
+        noise_type,
+        f"<strong>{best_filter}</strong> produced the highest PSNR (lowest MSE) among the four classical filters.",
+    )

@@ -1,5 +1,5 @@
 """
-Image Noise Removal Laboratory — Main Streamlit Application (Phase 5: Comparison & Metrics)
+Image Noise Removal Laboratory — Main Streamlit Application (Phase 6: Filter Comparison)
 
 Provides a modern dark-themed dashboard layout with sidebar navigation
 across four core views:
@@ -10,6 +10,7 @@ across four core views:
 """
 
 from pathlib import Path
+import matplotlib.pyplot as plt
 import numpy as np
 import streamlit as st
 
@@ -27,7 +28,12 @@ from src.image_utils import (
     load_sample_image,
     resize_for_display,
 )
-from src.metrics import evaluate_single_experiment, format_psnr
+from src.metrics import (
+    evaluate_all_filters,
+    evaluate_single_experiment,
+    format_psnr,
+    get_noise_filter_insight,
+)
 from src.noise import (
     INTENSITY_LEVELS,
     NOISE_DESCRIPTIONS,
@@ -35,6 +41,7 @@ from src.noise import (
     apply_noise,
     get_noise_parameter_label,
 )
+from src.visualization import plot_psnr_comparison
 
 
 # ---------------------------------------------------------------------------
@@ -612,7 +619,7 @@ def render_noise_laboratory() -> None:
 
 
 def render_filter_comparison() -> None:
-    """Placeholder for the all-filters comparison workspace (Phase 6)."""
+    """Render the all-filters comparison workspace with visual grid, table, and PSNR chart."""
     st.markdown(
         """
         <div class="hero-card">
@@ -620,27 +627,164 @@ def render_filter_comparison() -> None:
             <h1>Filter Comparison</h1>
             <p>
                 Evaluate Average, Gaussian, Median, and Bilateral filters side by side
-                on the same noisy image to see which method performs best.
+                on your active noisy image to discover which spatial filter performs best.
             </p>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-    st.markdown(
-        """
-        <div class="lab-card">
-            <span class="badge">Coming in Phase 6</span>
-            <h3>All-Filter Comparison Grid &amp; PSNR Chart</h3>
-            <p>
-                This workspace will run all four classical spatial filters simultaneously,
-                display a visual comparison grid, plot a PSNR bar chart, and highlight the
-                most effective filter for the selected noise type.
-            </p>
-        </div>
-        """,
-        unsafe_allow_html=True,
+    if st.session_state.original_image is None or st.session_state.noisy_image is None:
+        st.info(
+            "No active noisy image yet. Go to **Noise Laboratory**, load a clean image "
+            "in **Step 1**, and click **Apply Noise** in **Step 2** — then return here "
+            "to benchmark all four spatial filters side by side."
+        )
+        return
+
+    # Unified parameter controls for fair comparison
+    st.subheader("Comparison Settings")
+    c_ctrl1, c_ctrl2, c_ctrl3 = st.columns([1.2, 1.2, 1.4], gap="medium")
+
+    with c_ctrl1:
+        cmp_kernel = st.select_slider(
+            label="Kernel Size (Average / Gaussian / Median)",
+            options=KERNEL_SIZES,
+            value=5,
+            help="Applies the same odd window size across Average, Gaussian, and Median filters.",
+        )
+
+    with c_ctrl2:
+        cmp_bilateral_sigma = st.slider(
+            label="Bilateral Sigma (Color & Space)",
+            min_value=25,
+            max_value=150,
+            value=75,
+            step=25,
+            help="Controls edge-preserving smoothing strength for the Bilateral Filter.",
+        )
+
+    with c_ctrl3:
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.caption(
+            f"**Active Noisy Image:** {st.session_state.image_info['filename']}  \n"
+            f"**Noise:** {st.session_state.noise_type} — "
+            f"{st.session_state.noise_intensity} ({st.session_state.noise_param_label})"
+        )
+
+    # Run all 4 filters simultaneously
+    benchmark = evaluate_all_filters(
+        original=st.session_state.original_image,
+        noisy=st.session_state.noisy_image,
+        kernel_size=cmp_kernel,
+        bilateral_diameter=9,
+        bilateral_sigma=float(cmp_bilateral_sigma),
     )
+
+    st.divider()
+
+    # Top-level summary metrics
+    best_gain_text = (
+        "+∞ dB"
+        if np.isinf(benchmark["best_gain"])
+        else f"{benchmark['best_gain']:+.2f} dB"
+    )
+    k1, k2, k3 = st.columns(3, gap="medium")
+    k1.metric("Best Performing Filter", benchmark["best_filter"])
+    k2.metric(
+        "Best Filtered PSNR",
+        format_psnr(benchmark["best_psnr"]),
+        delta=best_gain_text,
+    )
+    k3.metric("Noisy Baseline PSNR", format_psnr(benchmark["noisy_psnr"]))
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # Visual comparison grid: 2 rows of 3 images (Original, Noisy, and 4 Filters)
+    st.subheader("Visual Comparison Grid")
+    row1 = st.columns(3, gap="medium")
+    row2 = st.columns(3, gap="medium")
+
+    with row1[0]:
+        st.image(
+            resize_for_display(st.session_state.original_image, max_width=460),
+            caption="Original Clean Image",
+            width="stretch",
+        )
+
+    with row1[1]:
+        st.image(
+            resize_for_display(st.session_state.noisy_image, max_width=460),
+            caption=(
+                f"Noisy ({st.session_state.noise_type}) — "
+                f"PSNR: {format_psnr(benchmark['noisy_psnr'])}"
+            ),
+            width="stretch",
+        )
+
+    filter_slots = [row1[2], row2[0], row2[1], row2[2]]
+    for slot, entry in zip(filter_slots, benchmark["results"]):
+        star = " ★ Best" if entry["filter_name"] == benchmark["best_filter"] else ""
+        with slot:
+            st.image(
+                resize_for_display(entry["image"], max_width=460),
+                caption=(
+                    f"{entry['filter_name']}{star} — "
+                    f"PSNR: {format_psnr(entry['psnr'])}"
+                ),
+                width="stretch",
+            )
+
+    st.divider()
+
+    # Quantitative Metrics Table & Dark-Themed PSNR Bar Chart
+    st.subheader("Quantitative Analysis & PSNR Chart")
+    table_col, chart_col = st.columns([1.05, 1.15], gap="large")
+
+    with table_col:
+        table_rows = []
+        for entry in benchmark["results"]:
+            gain_str = (
+                "+∞ dB"
+                if np.isinf(entry["psnr_gain"])
+                else f"{entry['psnr_gain']:+.2f} dB"
+            )
+            badge = "★ " if entry["filter_name"] == benchmark["best_filter"] else ""
+            table_rows.append(
+                {
+                    "Filter": f"{badge}{entry['filter_name']}",
+                    "Parameters": entry["params"],
+                    "MSE (↓)": f"{entry['mse']:.2f}",
+                    "PSNR (↑)": format_psnr(entry["psnr"]),
+                    "Gain vs. Noisy": gain_str,
+                }
+            )
+        st.dataframe(table_rows, width="stretch", hide_index=True)
+
+        # Academic insight card right below the table
+        insight = get_noise_filter_insight(
+            st.session_state.noise_type,
+            benchmark["best_filter"],
+        )
+        st.markdown(
+            f"""
+            <div class="lab-card">
+                <span class="badge">Academic Takeaway</span>
+                <h3>Best Filter for {st.session_state.noise_type}</h3>
+                <p>{insight}</p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    with chart_col:
+        fig = plot_psnr_comparison(
+            filter_results=benchmark["results"],
+            noisy_psnr=benchmark["noisy_psnr"],
+            best_filter_name=benchmark["best_filter"],
+        )
+        st.pyplot(fig, width="stretch")
+        plt.close(fig)
 
 
 def render_about_project() -> None:
@@ -738,7 +882,7 @@ def main() -> None:
         )
 
         st.divider()
-        st.caption("Phase 5 • Comparison & Metrics")
+        st.caption("Phase 6 • Filter Comparison & Chart")
 
     if page == "Dashboard":
         render_dashboard()
