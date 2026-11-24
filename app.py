@@ -1,5 +1,5 @@
 """
-Image Noise Removal Laboratory — Main Streamlit Application (Phase 1: UI Shell)
+Image Noise Removal Laboratory — Main Streamlit Application (Phase 2: Image Input)
 
 Provides a modern dark-themed dashboard layout with sidebar navigation
 across four core views:
@@ -11,6 +11,13 @@ across four core views:
 
 from pathlib import Path
 import streamlit as st
+
+from src.image_utils import (
+    list_sample_images,
+    load_and_validate_image,
+    load_sample_image,
+    resize_for_display,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -32,6 +39,30 @@ def load_custom_css() -> None:
             f"<style>{css_path.read_text(encoding='utf-8')}</style>",
             unsafe_allow_html=True,
         )
+
+
+def init_session_state() -> None:
+    """Initialize shared Streamlit session state keys once per session."""
+    defaults = {
+        "original_image": None,
+        "image_info": None,
+        "active_image_id": None,
+        "noisy_image": None,
+        "filtered_image": None,
+    }
+    for key, value in defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = value
+
+
+def set_active_image(image, info: dict, image_id: str) -> None:
+    """Store a new active clean image and clear stale noisy/filtered outputs."""
+    if st.session_state.active_image_id != image_id:
+        st.session_state.original_image = image
+        st.session_state.image_info = info
+        st.session_state.active_image_id = image_id
+        st.session_state.noisy_image = None
+        st.session_state.filtered_image = None
 
 
 # ---------------------------------------------------------------------------
@@ -148,33 +179,114 @@ def render_dashboard() -> None:
 
 
 def render_noise_laboratory() -> None:
-    """Placeholder for the interactive Noise Laboratory (Phases 2–5)."""
+    """Render the interactive Noise Laboratory (Phase 2: Image Input & Preview)."""
     st.markdown(
         """
         <div class="hero-card">
             <span class="badge">Interactive Workspace</span>
             <h1>Noise Laboratory</h1>
             <p>
-                Upload a clean image, add controlled noise, apply spatial filters,
-                and inspect side-by-side results in one streamlined workspace.
+                Upload a clean JPG/PNG image or choose a reference sample to inspect
+                it before applying controlled noise and spatial filters.
             </p>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-    c1, c2, c3 = st.columns(3, gap="medium")
-    with c1:
-        st.markdown(
-            """
-            <div class="lab-card">
-                <span class="badge">Coming in Phase 2</span>
-                <h3>1. Image Input</h3>
-                <p>Upload JPG/PNG files or pick a clean sample image with automatic validation.</p>
-            </div>
-            """,
-            unsafe_allow_html=True,
+    # ------------------------------------------------------------------
+    # Step 1: Image Input (Upload or Sample Selection)
+    # ------------------------------------------------------------------
+    st.subheader("1. Image Input")
+
+    input_col, preview_col = st.columns([1, 1.3], gap="large")
+
+    with input_col:
+        input_mode = st.radio(
+            label="Image Source",
+            options=["Upload Clean Image", "Select Sample Image"],
+            horizontal=True,
         )
+
+        if input_mode == "Upload Clean Image":
+            uploaded_file = st.file_uploader(
+                label="Upload a clean image (JPG, JPEG, or PNG)",
+                type=["jpg", "jpeg", "png"],
+                help="Choose a clean reference image to use in your denoising experiments.",
+            )
+            if uploaded_file is not None:
+                try:
+                    image_rgb, info = load_and_validate_image(uploaded_file)
+                    image_id = f"upload:{uploaded_file.name}:{uploaded_file.size}"
+                    set_active_image(image_rgb, info, image_id)
+                    st.success(f"Loaded **{info['filename']}** successfully.")
+                except ValueError as err:
+                    st.error(str(err))
+        else:
+            sample_paths = list_sample_images()
+            if not sample_paths:
+                st.info(
+                    "No sample images found in `sample_images/` yet. "
+                    "Add 5–8 clean JPG/PNG images from the Kaggle dataset into "
+                    "`sample_images/`, or switch to **Upload Clean Image**."
+                )
+            else:
+                sample_names = [p.name for p in sample_paths]
+                selected_name = st.selectbox(
+                    label="Choose a clean reference image",
+                    options=sample_names,
+                )
+                selected_path = next(p for p in sample_paths if p.name == selected_name)
+                try:
+                    image_rgb, info = load_sample_image(selected_path)
+                    image_id = f"sample:{selected_path.name}"
+                    set_active_image(image_rgb, info, image_id)
+                    st.success(f"Selected sample **{info['filename']}**.")
+                except ValueError as err:
+                    st.error(str(err))
+
+        # Show image metadata if an image is currently loaded
+        if st.session_state.image_info is not None:
+            info = st.session_state.image_info
+            st.markdown("<br>", unsafe_allow_html=True)
+            m1, m2, m3 = st.columns(3)
+            m1.metric("Resolution", f"{info['width']} × {info['height']}")
+            m2.metric("Format", info["format"])
+            m3.metric("Color Space", f"RGB ({info['channels']}ch)")
+
+            if info["original_mode"] != "RGB":
+                st.caption(
+                    f"Converted automatically from `{info['original_mode']}` to `RGB` "
+                    "for consistent noise and filter processing."
+                )
+
+    with preview_col:
+        if st.session_state.original_image is not None:
+            preview_img = resize_for_display(st.session_state.original_image)
+            st.image(
+                preview_img,
+                caption=f"Original Image — {st.session_state.image_info['filename']}",
+                width="stretch",
+            )
+        else:
+            st.markdown(
+                """
+                <div class="lab-card">
+                    <span class="badge">Preview Area</span>
+                    <h3>No Image Loaded Yet</h3>
+                    <p>
+                        Upload a clean JPG, JPEG, or PNG file on the left (or select a
+                        sample image) to preview it here.
+                    </p>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+    st.divider()
+
+    # Upcoming phases placeholders
+    c2, c3 = st.columns(2, gap="medium")
     with c2:
         st.markdown(
             """
@@ -191,7 +303,7 @@ def render_noise_laboratory() -> None:
             """
             <div class="lab-card">
                 <span class="badge">Coming in Phases 4–5</span>
-                <h3>3. Filtering &amp; Comparison</h3>
+                <h3>3. Spatial Filtering &amp; Comparison</h3>
                 <p>Apply spatial filters and compare Original, Noisy, and Filtered images with PSNR.</p>
             </div>
             """,
@@ -301,6 +413,7 @@ def render_about_project() -> None:
 def main() -> None:
     """Initialize styling, render sidebar navigation, and route active page."""
     load_custom_css()
+    init_session_state()
 
     with st.sidebar:
         st.markdown(
@@ -325,7 +438,7 @@ def main() -> None:
         )
 
         st.divider()
-        st.caption("Phase 1 • UI Shell & Navigation")
+        st.caption("Phase 2 • Image Input & Validation")
 
     if page == "Dashboard":
         render_dashboard()
