@@ -1,5 +1,5 @@
 """
-Image Noise Removal Laboratory — Main Streamlit Application (Phase 4: Spatial Filtering)
+Image Noise Removal Laboratory — Main Streamlit Application (Phase 5: Comparison & Metrics)
 
 Provides a modern dark-themed dashboard layout with sidebar navigation
 across four core views:
@@ -10,6 +10,7 @@ across four core views:
 """
 
 from pathlib import Path
+import numpy as np
 import streamlit as st
 
 from src.filters import (
@@ -26,6 +27,7 @@ from src.image_utils import (
     load_sample_image,
     resize_for_display,
 )
+from src.metrics import evaluate_single_experiment, format_psnr
 from src.noise import (
     INTENSITY_LEVELS,
     NOISE_DESCRIPTIONS,
@@ -518,20 +520,95 @@ def render_noise_laboratory() -> None:
 
     st.divider()
 
-    # Upcoming phase placeholder
-    st.markdown(
-        """
-        <div class="lab-card">
-            <span class="badge">Coming in Phase 5</span>
-            <h3>4. 3-Way Visual Comparison &amp; MSE / PSNR Metrics</h3>
-            <p>
-                Side-by-side Original, Noisy, and Filtered comparison grid with
-                quantitative MSE/PSNR scores and an automatic experiment summary.
-            </p>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    # ------------------------------------------------------------------
+    # Step 4: 3-Way Visual Comparison & Quality Summary (MSE / PSNR)
+    # ------------------------------------------------------------------
+    st.subheader("4. Visual Comparison & Quality Summary")
+
+    if st.session_state.filtered_image is None:
+        st.info(
+            "Apply a spatial filter in **Step 3** to view the 3-way comparison "
+            "(Original vs. Noisy vs. Filtered) and MSE/PSNR quality metrics."
+        )
+    else:
+        summary = evaluate_single_experiment(
+            original=st.session_state.original_image,
+            noisy=st.session_state.noisy_image,
+            filtered=st.session_state.filtered_image,
+            noise_type=st.session_state.noise_type,
+            noise_intensity=st.session_state.noise_intensity,
+            noise_params=st.session_state.noise_param_label,
+            filter_name=st.session_state.filter_name,
+            filter_params=st.session_state.filter_param_label,
+        )
+
+        # Consistent 3-column comparison grid
+        cmp_orig, cmp_noisy, cmp_filt = st.columns(3, gap="medium")
+
+        with cmp_orig:
+            st.image(
+                resize_for_display(st.session_state.original_image, max_width=520),
+                caption="1. Original Clean Image",
+                width="stretch",
+            )
+
+        with cmp_noisy:
+            st.image(
+                resize_for_display(st.session_state.noisy_image, max_width=520),
+                caption=(
+                    f"2. Noisy — {summary['noise_type']} "
+                    f"({summary['noise_intensity']})"
+                ),
+                width="stretch",
+            )
+
+        with cmp_filt:
+            st.image(
+                resize_for_display(st.session_state.filtered_image, max_width=520),
+                caption=(
+                    f"3. Filtered — {summary['filter_name']} "
+                    f"({summary['filter_params']})"
+                ),
+                width="stretch",
+            )
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # Quantitative MSE & PSNR metric cards
+        m1, m2, m3, m4 = st.columns(4, gap="medium")
+        psnr_delta_text = (
+            "+∞ dB"
+            if np.isinf(summary["psnr_gain"])
+            else f"{summary['psnr_gain']:+.2f} dB"
+        )
+        m1.metric("Noisy PSNR", format_psnr(summary["noisy_psnr"]))
+        m2.metric(
+            "Filtered PSNR",
+            format_psnr(summary["filtered_psnr"]),
+            delta=psnr_delta_text,
+        )
+        m3.metric("Noisy MSE", f"{summary['noisy_mse']:.2f}")
+        m4.metric(
+            "Filtered MSE",
+            f"{summary['filtered_mse']:.2f}",
+            delta=f"{summary['mse_delta']:+.2f}",
+            delta_color="inverse",
+        )
+
+        st.markdown(
+            f"""
+            <div class="lab-card">
+                <span class="badge">Experiment Summary</span>
+                <h3>{summary['filter_name']} on {summary['noise_type']}</h3>
+                <p>
+                    <strong>Noise:</strong> {summary['noise_type']} — {summary['noise_intensity']} ({summary['noise_params']})<br>
+                    <strong>Filter:</strong> {summary['filter_name']} ({summary['filter_params']})<br><br>
+                    <strong>Observation:</strong> {summary['verdict']}
+                </p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
 
 def render_filter_comparison() -> None:
@@ -661,7 +738,7 @@ def main() -> None:
         )
 
         st.divider()
-        st.caption("Phase 4 • Spatial Filtering")
+        st.caption("Phase 5 • Comparison & Metrics")
 
     if page == "Dashboard":
         render_dashboard()
